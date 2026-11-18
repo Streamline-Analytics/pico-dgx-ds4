@@ -156,10 +156,12 @@ fn spells(ids: &[u32], spans: &[(u32, u32, u64)], tok: &Tokenizer, text: &[u8]) 
 /// Are the images inside a reused prefix the same images? `have` are the session's spans, `spans` the
 /// new request's, `reused` how many ids are taken from the session. Only the session's spans that end
 /// inside the prefix matter: the ones past it are not reused.
+/// A hash of 0 means the encoder sent none (`vision.rs` reads a missing "hash" as 0): such a span can never be
+/// told apart from another image of the same size, so it never counts as agreeing and its prefix is not reused.
 fn spans_agree(have: &[(u32, u32, u64)], spans: &[(u32, u32, u64)], reused: usize) -> bool {
     have.iter()
         .filter(|&&(start, rows, _)| start as usize + rows as usize <= reused)
-        .all(|&(start, rows, hash)| spans.iter().any(|&(s, r, h)| s == start && r == rows && h == hash))
+        .all(|&(start, rows, hash)| hash != 0 && spans.iter().any(|&(s, r, h)| s == start && r == rows && h == hash))
 }
 
 fn fnv(b: &[u8]) -> u64 {
@@ -520,6 +522,17 @@ impl SessionTable {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn spans_without_a_hash_never_agree() {
+        let have = [(10, 5, 7u64), (40, 5, 0u64)];
+        // both spans inside the reused prefix: the second has no hash, so no reuse
+        assert!(!spans_agree(&have, &have, 100));
+        // only the hashed span is inside the reused prefix: it agrees
+        assert!(spans_agree(&have, &have, 30));
+        // a different image of the same size and place does not agree
+        assert!(!spans_agree(&[(10, 5, 7)], &[(10, 5, 8)], 30));
+    }
 
     const TOKENIZER: &str = "/data/models/DeepSeek-V4.1-Flash-UNCENSORED-FP8/tokenizer.json";
 
